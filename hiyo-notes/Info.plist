@@ -1,0 +1,4 @@
+<key>NSDocumentsFolderUsageDescription</key>
+<string>メモファイルを保存するためにDocumentsフォルダへのアクセスが必要です</string>
+<key>NSDesktopFolderUsageDescription</key>
+<string>メモファイルを保存するためにDesktopフォルダへのアクセスが必要です</string> 

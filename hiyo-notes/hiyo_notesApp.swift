@@ -36,35 +36,39 @@ class WindowManager: ObservableObject {
         }
     }
     
-    private weak var window: NSWindow?
+    private var window: NSWindow?
     
     func setupWindow() {
-        // より確実にウィンドウを取得
-        guard let window = NSApplication.shared.windows.first(where: { $0.isVisible }) else {
-            print("❌ Failed to find window")
-            return
+        // 現在のウィンドウを取得
+        DispatchQueue.main.async {
+            if let window = NSApplication.shared.windows.first {
+                self.window = window
+                print("✅ Window reference established")
+            } else {
+                print("❌ No window found")
+            }
         }
-        
-        self.window = window
-        print("✅ Window setup completed: \(window)")
+    }
+    
+    // 最前面表示をトグルするメソッドを追加
+    func toggleAlwaysOnTop() {
+        isAlwaysOnTop.toggle()
     }
     
     func setupWindowSizeAndPosition() {
-        guard let window = self.window,
-              let screen = NSScreen.main else {
-            print("❌ Failed to get window or screen")
+        guard let window = self.window else {
+            print("❌ Window not available for sizing")
             return
         }
         
+        let windowWidth: CGFloat = 600
+        let windowHeight: CGFloat = 400
+        
+        // 画面の中央に配置
+        guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
-        
-        // ウィンドウサイズを計算（横25%、縦100%）
-        let windowWidth = screenFrame.width * 0.25
-        let windowHeight = screenFrame.height
-        
-        // 右端に配置するためのX座標を計算
-        let windowX = screenFrame.maxX - windowWidth
-        let windowY = screenFrame.minY
+        let windowX = screenFrame.midX - windowWidth / 2
+        let windowY = screenFrame.midY - windowHeight / 2
         
         let newFrame = NSRect(
             x: windowX,
