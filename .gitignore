@@ -1,0 +1,10 @@
+# Xcode
+build/
+*.dmg
+
+# macOS
+.DS_Store
+
+# Xcode user data
+*.xcuserdata
+xcuserdata/ 
