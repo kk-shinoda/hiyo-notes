@@ -16,14 +16,16 @@ struct hiyo_notesApp: App {
             ContentView()
                 .environmentObject(windowManager)
                 .onAppear {
-                    // ウィンドウが表示された後にWindowManagerに参照を設定
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        windowManager.setupWindow()
-                        windowManager.setupWindowSizeAndPosition()
-                    }
+                    windowManager.setupWindow()
                 }
         }
         .windowResizability(.contentSize)
+        .commands {
+            // 重複ウィンドウを防ぐためにコマンドメニューを制限
+            CommandGroup(replacing: .newItem) {
+                // 新規ウィンドウコマンドを無効化
+            }
+        }
     }
 }
 
@@ -31,44 +33,56 @@ struct hiyo_notesApp: App {
 class WindowManager: ObservableObject {
     @Published var isAlwaysOnTop: Bool = false {
         didSet {
-            print("🔄 isAlwaysOnTop changed to: \(isAlwaysOnTop)")
             updateWindowLevel()
         }
     }
     
     private var window: NSWindow?
+    private let logger = DebugLogger.shared
+    
+    // ウィンドウ設定定数
+    private struct WindowConstants {
+        static let widthRatio: CGFloat = 0.25       // 画面幅の25%
+        static let heightRatio: CGFloat = 1.0       // 画面高の100%
+        static let rightMargin: CGFloat = 5         // 右端からの余白
+    }
     
     func setupWindow() {
-        // 現在のウィンドウを取得
         DispatchQueue.main.async {
-            if let window = NSApplication.shared.windows.first {
-                self.window = window
-                print("✅ Window reference established")
-            } else {
-                print("❌ No window found")
+            // 最初のウィンドウのみを取得
+            for window in NSApplication.shared.windows {
+                if window.title.isEmpty || window.title.contains("hiyo-notes") {
+                    self.window = window
+                    self.setupWindowSizeAndPosition()
+                    self.logger.logWindowSetup("Window reference established")
+                    break
+                }
             }
         }
     }
     
-    // 最前面表示をトグルするメソッドを追加
     func toggleAlwaysOnTop() {
         isAlwaysOnTop.toggle()
+        logger.logWindowSetup("isAlwaysOnTop changed to: \(isAlwaysOnTop)")
     }
     
-    func setupWindowSizeAndPosition() {
+    private func setupWindowSizeAndPosition() {
         guard let window = self.window else {
-            print("❌ Window not available for sizing")
+            logger.logWindowSetup("Window not available for sizing")
             return
         }
         
-        let windowWidth: CGFloat = 600
-        let windowHeight: CGFloat = 400
-        
-        // 画面の中央に配置
         guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
-        let windowX = screenFrame.midX - windowWidth / 2
-        let windowY = screenFrame.midY - windowHeight / 2
+        
+        // 画面幅の25%をウィンドウ幅として使用
+        let windowWidth = screenFrame.width * WindowConstants.widthRatio
+        let windowHeight = screenFrame.height  // 画面高の100%
+        
+        // 画面の右側に配置（右端から少し余白を持たせる）
+        let margin: CGFloat = WindowConstants.rightMargin
+        let windowX = screenFrame.maxX - windowWidth - margin
+        let windowY = screenFrame.minY
         
         let newFrame = NSRect(
             x: windowX,
@@ -77,38 +91,26 @@ class WindowManager: ObservableObject {
             height: windowHeight
         )
         
-        DispatchQueue.main.async {
-            window.setFrame(newFrame, display: true, animate: true)
-            print("📐 Window positioned: width=\(windowWidth), height=\(windowHeight)")
-            print("📍 Window position: x=\(windowX), y=\(windowY)")
-        }
+        window.setFrame(newFrame, display: true, animate: false)
+        logger.logWindowSetup("Window positioned at right 25% (full height): width=\(Int(windowWidth)), height=\(Int(windowHeight))")
+        logger.logWindowSetup("Window position: x=\(Int(windowX)), y=\(Int(windowY))")
     }
     
     private func updateWindowLevel() {
-        // ウィンドウ参照がない場合は再取得を試行
-        if window == nil {
-            print("❌ Window reference is nil, trying to find window...")
-            setupWindow()
-        }
-        
         guard let window = self.window else {
-            print("❌ Still no window found")
             return
         }
         
         DispatchQueue.main.async {
             if self.isAlwaysOnTop {
-                print("🔝 Setting window to floating level")
                 window.level = .floating
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+                self.logger.logWindowSetup("Window set to floating level")
             } else {
-                print("📱 Setting window to normal level")
                 window.level = .normal
                 window.collectionBehavior = [.canJoinAllSpaces]
+                self.logger.logWindowSetup("Window set to normal level")
             }
-            
-            // 現在のウィンドウレベルを確認
-            print("📊 Current window level: \(window.level.rawValue)")
         }
     }
 }

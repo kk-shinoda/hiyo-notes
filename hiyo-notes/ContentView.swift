@@ -14,14 +14,103 @@ struct ContentView: View {
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var saveTimer: Timer?
-    @State private var showingExporter = false
+    @State private var showingImporter = false
     @EnvironmentObject private var windowManager: WindowManager
     @StateObject private var settingsManager = SettingsManager()
+    @StateObject private var genreManager = GenreManager()
+    @StateObject private var noteManager: NoteManager
+    
+    init() {
+        let settings = SettingsManager()
+        let genres = GenreManager()
+        let notes = NoteManager(settingsManager: settings, genreManager: genres)
+        
+        _settingsManager = StateObject(wrappedValue: settings)
+        _genreManager = StateObject(wrappedValue: genres)
+        _noteManager = StateObject(wrappedValue: notes)
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             // ツールバー
             HStack {
+                // ジャンル選択ドロップダウン
+                Menu {
+                    ForEach(genreManager.genres) { genre in
+                        Button(action: {
+                            genreManager.setCurrentGenre(genre)
+                            noteManager.switchToGenre(genre.name)
+                        }) {
+                            HStack {
+                                Circle()
+                                    .fill(genreManager.getGenreColor(genre))
+                                    .frame(width: 8, height: 8)
+                                Text(genre.name)
+                                if genre.id == genreManager.currentGenre.id {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Circle()
+                            .fill(genreManager.getGenreColor(genreManager.currentGenre))
+                            .frame(width: 8, height: 8)
+                        Text(genreManager.currentGenre.name)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .help("ジャンルを選択")
+                
+                // 新規メモボタン
+                Button(action: createNewNote) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.borderless)
+                .help("新規メモ (⌘N)")
+                .keyboardShortcut("n", modifiers: .command)
+                
+                // 保存ボタン
+                Button(action: saveCurrentNote) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.borderless)
+                .help("保存 (⌘S)")
+                .keyboardShortcut("s", modifiers: .command)
+                
+                // 読み込みボタン
+                Button(action: { showingImporter = true }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.borderless)
+                .help("読み込み (⌘O)")
+                .keyboardShortcut("o", modifiers: .command)
+                
+                Spacer()
+                
+                // 現在のメモ情報
+                if let currentNote = noteManager.currentNote {
+                    Text(currentNote.filename)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(4)
+                }
+                
+                // 設定ボタン
                 Button(action: {
                     showingSettings = true
                 }) {
@@ -31,18 +120,7 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("設定")
                 
-                Spacer()
-                
-                // 手動保存ボタンを追加
-                Button(action: {
-                    showingExporter = true
-                }) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.borderless)
-                .help("名前を付けて保存")
-                
+                // 最前面表示ボタン
                 Button(action: {
                     windowManager.toggleAlwaysOnTop()
                 }) {
@@ -67,78 +145,83 @@ struct ContentView: View {
                 .padding(12)
         }
         .onAppear {
-            loadNote()
+            initializeApp()
         }
-        .onChange(of: noteText) { _, _ in
-            autoSave()
+        .onChange(of: genreManager.currentGenre) { _, newGenre in
+            noteManager.switchToGenre(newGenre.name)
+        }
+        .onChange(of: noteManager.currentNote) { _, newNote in
+            if let note = newNote {
+                noteText = note.content
+            }
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(settingsManager: settingsManager)
+            SettingsView(settingsManager: settingsManager, genreManager: genreManager, noteManager: noteManager)
+        }
+        .fileExporter(
+            isPresented: $noteManager.showingExporter,
+            document: noteManager.documentToExport,
+            contentType: .plainText,
+            defaultFilename: noteManager.currentNote?.filename ?? "note.md"
+        ) { result in
+            switch result {
+            case .success(let url):
+                print("✅ Note saved to: \(url)")
+                noteManager.onSaveCompleted()
+            case .failure(let error):
+                print("❌ Save failed: \(error)")
+                showAlert("保存に失敗しました: \(error.localizedDescription)")
+            }
+        }
+        .fileImporter(
+            isPresented: $showingImporter,
+            allowedContentTypes: [.plainText, .text],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    loadNoteFromFile(url)
+                }
+            case .failure(let error):
+                print("❌ Import failed: \(error)")
+                showAlert("読み込みに失敗しました: \(error.localizedDescription)")
+            }
         }
         .alert("エラー", isPresented: $showingAlert) {
             Button("OK") { }
         } message: {
             Text(alertMessage)
         }
-        .fileExporter(
-            isPresented: $showingExporter,
-            document: TextDocument(text: noteText),
-            contentType: .plainText,
-            defaultFilename: "hiyo-notes"
-        ) { result in
-            switch result {
-            case .success(let url):
-                print("✅ File exported to: \(url)")
-            case .failure(let error):
-                showAlert("エクスポートに失敗しました: \(error.localizedDescription)")
-            }
-        }
     }
     
-    // シンプルなノート保存（デフォルト場所のみ）
-    private func saveNote() {
-        guard let saveURL = settingsManager.getSaveLocationURL() else {
-            showAlert("保存場所が設定されていません")
-            return
-        }
-        
-        let fileURL = saveURL.appendingPathComponent("hiyo-notes.txt")
-        
+    // アプリ初期化
+    private func initializeApp() {
+        // NoteManagerの初期化で自動的にdefault_001.mdが作成される
+        print("🚀 App initialized")
+    }
+    
+    // 新規メモを作成
+    private func createNewNote() {
+        noteManager.createNewNote()
+        noteText = ""
+        print("📝 New note created for genre: \(genreManager.currentGenre.name)")
+    }
+    
+    // メモを保存
+    private func saveCurrentNote() {
+        noteManager.saveNote(content: noteText)
+    }
+    
+    // ファイルからメモを読み込み
+    private func loadNoteFromFile(_ url: URL) {
         do {
-            try noteText.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("✅ ファイルを保存しました: \(fileURL.path)")
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let filename = url.lastPathComponent
+            let document = NoteDocument(text: content, suggestedFilename: filename)
+            noteManager.loadNoteFromDocument(document, filename: filename)
         } catch {
-            // デフォルト場所での保存に失敗した場合はfileExporterを使用
-            print("⚠️ Default save failed, using fileExporter: \(error)")
-            showingExporter = true
-        }
-    }
-    
-    // ノートの読み込み
-    private func loadNote() {
-        guard let saveURL = settingsManager.getSaveLocationURL() else {
-            noteText = "ここにメモを入力してください..."
-            return
-        }
-        
-        let fileURL = saveURL.appendingPathComponent("hiyo-notes.txt")
-        
-        do {
-            noteText = try String(contentsOf: fileURL, encoding: .utf8)
-            print("✅ ファイルを読み込みました: \(fileURL.path)")
-        } catch {
-            noteText = "ここにメモを入力してください..."
-            print("📝 新規ファイルを作成します")
-        }
-    }
-    
-    // 自動保存（デバウンス付き）
-    private func autoSave() {
-        saveTimer?.invalidate()
-        saveTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
-            DispatchQueue.main.async {
-                self.saveNote()
-            }
+            showAlert("ファイルの読み込みに失敗しました: \(error.localizedDescription)")
         }
     }
     

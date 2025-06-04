@@ -1,6 +1,7 @@
 ---
 description: Swift のコーディング規約
 globs: *.swift
+alwaysApply: false
 ---
   # CONTEXT
   
@@ -61,6 +62,12 @@ globs: *.swift
   
   ---
   
+  # Precautions
+  - Sometimes you may write code that is not compatible with Swift 6 and get an error. Make sure that this never happens.
+  - Make sure to use fileImporter/fileExporter consistently to read and write files.
+  
+  ---
+
   # START ANALYSIS
   
   If you understand, please prepare to assist me and await my question.
