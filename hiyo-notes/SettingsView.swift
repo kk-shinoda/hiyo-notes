@@ -15,6 +15,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var newGenreName = ""
     @State private var showingAddGenre = false
+    @State private var genreErrorMessage: String? = nil
+    @State private var showGenreError: Bool = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -82,6 +84,18 @@ struct SettingsView: View {
                             Text("ジャンル管理")
                                 .font(.headline)
                             
+                            // エラーメッセージ表示
+                            if showGenreError, let errorMessage = genreErrorMessage {
+                                Text(errorMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.1))
+                                    .cornerRadius(4)
+                                    .transition(.opacity)
+                            }
+                            
                             Spacer()
                             
                             Button("追加") {
@@ -133,6 +147,13 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 500, height: 500)
+        .onChange(of: genreManager.errorId) { _, errorId in
+            print("🔄 SettingsView: GenreManager.errorId changed to \(errorId)")
+            if !genreManager.errorMessage.isEmpty {
+                showGenreErrorMessage(genreManager.errorMessage)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: showGenreError)
         .fileImporter(
             isPresented: $settingsManager.showingFolderPicker,
             allowedContentTypes: [.folder],
@@ -162,6 +183,19 @@ struct SettingsView: View {
             }
         } message: {
             Text("新しいジャンルの名前を入力してください")
+        }
+    }
+    
+    private func showGenreErrorMessage(_ message: String) {
+        print("🟢 SettingsView: エラーメッセージ表示 - \(message)")
+        genreErrorMessage = message
+        showGenreError = true
+        
+        // 3秒後に自動クリア（設定画面なので短めに設定）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            print("🟢 SettingsView: エラーメッセージクリア")
+            self.genreErrorMessage = nil
+            self.showGenreError = false
         }
     }
 }

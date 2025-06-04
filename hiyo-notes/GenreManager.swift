@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Foundation
 
 struct Genre: Identifiable, Codable, Equatable {
     let id: UUID
@@ -24,8 +25,11 @@ struct Genre: Identifiable, Codable, Equatable {
 class GenreManager: ObservableObject {
     @Published var genres: [Genre] = []
     @Published var currentGenre: Genre = Genre(name: "default", color: "blue", isDefault: true)
+    @Published var errorMessage: String = ""
+    @Published var errorId: UUID = UUID()
     
     private let logger = DebugLogger.shared
+    private var errorTimer: Timer?
     
     // 設定キー定数
     private struct UserDefaultsKeys {
@@ -40,6 +44,13 @@ class GenreManager: ObservableObject {
             Genre(name: "default", color: "blue", isDefault: true),
         ]
         static let defaultGenreName = "default"
+    }
+    
+    // 利用可能な色のリスト
+    private struct AvailableColors {
+        static let list = [
+            "blue", "green", "orange", "red", "purple", "pink", "yellow"
+        ]
     }
     
     init() {
@@ -72,6 +83,22 @@ class GenreManager: ObservableObject {
         logger.logGenreOperation("Current genre: \(currentGenre.name)")
     }
     
+    // UserDefaultsとジャンルデータをリセット（デバッグ用）
+    func resetToDefaults() {
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.savedGenres)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.currentGenre)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.genresInitialized)
+        
+        self.genres = DefaultGenres.list
+        self.currentGenre = self.genres.first { $0.name == DefaultGenres.defaultGenreName } ?? self.genres.first!
+        
+        saveGenres()
+        saveCurrentGenre()
+        UserDefaults.standard.set(true, forKey: UserDefaultsKeys.genresInitialized)
+        
+        logger.logGenreOperation("Reset genres to defaults")
+    }
+    
     // 保存された現在のジャンルを読み込み
     private func loadSavedCurrentGenre() {
         guard let currentGenreData = UserDefaults.standard.data(forKey: UserDefaultsKeys.currentGenre),
@@ -90,16 +117,50 @@ class GenreManager: ObservableObject {
     }
     
     // 新しいジャンルを追加
-    func addGenre(name: String, color: String? = nil) {
-        let newGenre = Genre(name: name, color: color, isDefault: false)
+    @discardableResult
+    func addGenre(name: String, color: String? = nil) -> Bool {
+        // ジャンル名の重複チェック
+        if genres.contains(where: { $0.name.lowercased() == name.lowercased() }) {
+            let message = "すでに存在するジャンル名です"
+            showErrorMessage(message)
+            logger.logGenreOperation("Cannot add genre: '\(name)' already exists")
+            return false
+        }
+        
+        let selectedColor = color ?? getNextAvailableColor()
+        let newGenre = Genre(name: name, color: selectedColor, isDefault: false)
         genres.append(newGenre)
         saveGenres()
-        logger.logGenreOperation("Added new genre: \(name)")
+        logger.logGenreOperation("Added new genre: \(name) with color: \(selectedColor)")
+        return true
+    }
+    
+    // ジャンル名の重複チェック
+    func isGenreNameDuplicate(_ name: String) -> Bool {
+        return genres.contains(where: { $0.name.lowercased() == name.lowercased() })
+    }
+    
+    // 次に利用可能な色を取得
+    private func getNextAvailableColor() -> String {
+        let usedColors = Set(genres.compactMap { $0.color })
+        
+        // 使用されていない色があれば最初のものを返す
+        for color in AvailableColors.list {
+            if !usedColors.contains(color) {
+                return color
+            }
+        }
+        
+        // すべての色が使用されている場合は循環的に選択
+        let colorIndex = genres.count % AvailableColors.list.count
+        return AvailableColors.list[colorIndex]
     }
     
     // ジャンルを削除（デフォルトジャンルは削除不可）
     func deleteGenre(_ genre: Genre) {
         guard !genre.isDefault else {
+            let message = "デフォルトジャンル「\(genre.name)」は削除できません"
+            showErrorMessage(message)
             logger.logGenreOperation("Cannot delete default genre: \(genre.name)")
             return
         }
@@ -149,5 +210,55 @@ class GenreManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(currentGenre) {
             UserDefaults.standard.set(encoded, forKey: UserDefaultsKeys.currentGenre)
         }
+    }
+    
+    // エラーメッセージを表示
+    private func showErrorMessage(_ message: String) {
+        logger.logGenreOperation("Showing error message: \(message)")
+        
+        // 既存のタイマーをクリア
+        errorTimer?.invalidate()
+        
+        // @Publishedプロパティで通知
+        logger.logGenreOperation("🔄 Setting @Published properties...")
+        DispatchQueue.main.async {
+            self.errorMessage = message
+            self.errorId = UUID()
+            self.logger.logGenreOperation("🔄 @Published properties updated - errorMessage: \(self.errorMessage), errorId: \(self.errorId)")
+        }
+        
+        // タイマーをメインスレッドで設定
+        DispatchQueue.main.async {
+            self.errorTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
+                self?.clearError()
+            }
+        }
+    }
+    
+    // エラーをクリア
+    func clearError() {
+        logger.logGenreOperation("Clearing error message")
+        errorTimer?.invalidate()
+        errorTimer = nil
+        
+        // @Publishedプロパティをクリア
+        DispatchQueue.main.async {
+            self.errorMessage = ""
+            self.errorId = UUID()
+            self.logger.logGenreOperation("🔄 @Published properties cleared")
+        }
+        
+        logger.logGenreOperation("Error cleared")
+    }
+    
+    // メモリリークを防ぐためのクリーンアップ
+    deinit {
+        errorTimer?.invalidate()
+    }
+    
+    // 現在のエラー状態を確認（デバッグ用）
+    func debugErrorState() {
+        logger.logGenreOperation("Error state - errorTimer: \(errorTimer != nil)")
+        logger.logGenreOperation("errorMessage: '\(errorMessage)', errorId: \(errorId)")
     }
 } 
